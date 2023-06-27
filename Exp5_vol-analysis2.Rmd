@@ -1,0 +1,215 @@
+---
+title: "Exp5_analysis"
+author: "R.A. Roston"
+date: "08/06/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ANTsR)
+library(ANTsRCore)
+library(viridis)
+
+setwd("/home2/rachel/P01/KOMP_Analysis/Experiments/Exp5_HeartShrink/")
+dir.baselineCT = "/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/"
+dir.baselineTransforms = "/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/Transforms/"
+dir.baselineCTtransformed = "/home2/rachel/P01/KOMP_Analysis/Experoiments/baselines/CT_transformed/"
+atlas = antsImageRead("/home2/rachel/P01/KOMP_Analysis/CT/Embryo_Atlas.nii.gz")
+experiment = "Exp5" # Heartx0.8
+
+```
+
+```{r rename MEMOS output}
+memos = dir("MEMOS")
+file.rename(from = paste0("MEMOS/", memos), to = paste0("MEMOS/", gsub("15.seg.nrrd", "15.5_Exp5.seg.nrrd", memos)))
+
+```
+
+## Load data
+
+```{r data}
+subjects = dir("CT")
+subjects = gsub("_Exp5.nrrd", "", subjects)
+subjects = subjects[-grep(pattern = "Atlas", subjects)]
+groups = c("baseline", "Exp5")
+
+imgs.exp = list()
+segments.exp = list()
+n = 0
+for(i in 1:length(subjects)){
+    n = n + 1
+    imgs.exp[[n]] = antsImageRead(paste0("CT_255/", subjects[i], "_", groups[2], ".nrrd"))
+    segments.exp[[n]] = antsImageRead(paste0("MEMOS/", subjects[i], "_", groups[2], ".seg.nrrd"))
+    segments.exp[[n]] = resampleImageToTarget(image = segments.exp[[n]], target = imgs.exp[[n]], interpType = "genericLabel")
+  }
+
+imgs.ctrl = list()
+segments.ctrl = list()
+n = 0
+for(i in 1:length(subjects)){
+    n = n + 1
+    imgs.ctrl[[n]] = antsImageRead(paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/", subjects[i], "_", groups[1], ".nrrd"))
+    segments.ctrl[[n]] = antsImageRead(paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/MEMOS/", subjects[i], "_", groups[1], ".seg.nrrd"))
+    segments.ctrl[[n]] = resampleImageToTarget(image = segments.ctrl[[n]], target = imgs.ctrl[[n]], interpType = "genericLabel")
+  }
+
+
+seg.stats.exp = list()
+for(i in 1:length(subjects)){
+  seg.stats.exp[[i]] = labelStats(imgs.exp[[i]], segments.exp[[i]])
+}
+names(seg.stats.exp) <- paste0(subjects, "_", groups[2])
+
+seg.stats.ctrl = list()
+for(i in 1:length(subjects)){
+  seg.stats.ctrl[[i]] = labelStats(imgs.ctrl[[i]], segments.ctrl[[i]])
+}
+names(seg.stats.ctrl) <- paste0(subjects, "_", groups[1])
+
+```
+
+## Analysis
+
+```{r data}
+labelnames = read.csv("/home2/rachel/P01/KOMP_Analysis/Masks/komp_label_conversion.csv")
+ctrl.vol.data = matrix(nrow = length(seg.stats.ctrl), ncol = length(seg.stats.ctrl[[1]]$Volume))
+
+for(i in 1:length(seg.stats.ctrl)){
+  ctrl.vol.data[i,] = seg.stats.ctrl[[i]]$Volume
+}
+ctrl.vol.data = as.data.frame(ctrl.vol.data, row.names = names(seg.stats.ctrl))
+colnames(ctrl.vol.data) <- paste0("Label_", seg.stats.ctrl[[1]]$LabelValue)
+
+exp.vol.data = matrix(nrow = length(seg.stats.exp), ncol = length(seg.stats.exp[[1]]$Volume))
+
+for(i in 1:length(seg.stats.exp)){
+  exp.vol.data[i,] = seg.stats.exp[[i]]$Volume
+}
+exp.vol.data = as.data.frame(exp.vol.data, row.names = names(seg.stats.exp))
+colnames(exp.vol.data) <- paste0("Label_", seg.stats.exp[[1]]$LabelValue)
+
+ctrl.vol.data$TotalHeart = ctrl.vol.data[,19] + ctrl.vol.data[,20] + ctrl.vol.data[,50] + ctrl.vol.data[,51]
+
+exp.vol.data$TotalHeart = exp.vol.data[,19] + exp.vol.data[,20] + exp.vol.data[,50] + ctrl.vol.data[,51]
+
+
+```
+
+
+
+```{r correlation plots all samples}
+# heart ventricles & chambers are labels 19,20,50,51
+
+
+slopes = vector()
+slopes[1:51] = 1
+slopes[52] = 0.512
+
+titles = c("External", labelnames$Structure, "TotalHeart")
+for(i in 2:ncol(exp.vol.data)){
+  tmp.lm = lm(exp.vol.data[,i] ~ ctrl.vol.data[,i])
+  plot(ctrl.vol.data[,i], exp.vol.data[,i], 
+       main = paste(titles[i], "(slope =", round(tmp.lm$coefficients[2],3),")"))
+  abline(reg = tmp.lm)
+  abline(a = 0, b = slopes[i], col = "blue")
+}
+
+
+#j = 20
+#plot(ctrl.vol.data[,j], exp.vol.data[,j], main = labelnames$V2[i])
+#  abline(reg = lm(exp.vol.data[,j] ~ ctrl.vol.data[,j]))
+#  abline(a= 0, b = 1, col = "blue")
+#  text(ctrl.vol.data[,j], exp.vol.data[,j], labels = 1:nrow(ctrl.vol.data), pos = 2)
+
+
+# exp.vol.data[5,] is an outlier because MEMOS segmented the fetus incorrectly. 
+
+
+```
+
+```{r correlation plots omitting outlier}
+# heart ventricles & chambers are labels 19,20,50,51
+
+omit = NA
+
+slopes = vector()
+slopes[1:51] = 1
+slopes[52] = 0.512
+
+titles = c("External", labelnames$Structure, "TotalHeart")
+for(i in 1:ncol(exp.vol.data)){
+  tmp.lm = lm(exp.vol.data[omit,i] ~ ctrl.vol.data[omit,i])
+  plot(ctrl.vol.data[omit,i], exp.vol.data[omit,i], 
+       main = paste(titles[i], "(slope =", round(tmp.lm$coefficients[2],3),")"))
+  abline(reg = tmp.lm)
+  abline(a= 0, b = slopes[i], col = "blue")
+}
+
+
+#j = 20
+#plot(ctrl.vol.data[,j], exp.vol.data[,j], main = labelnames$V2[i])
+#  abline(reg = lm(exp.vol.data[,j] ~ ctrl.vol.data[,j]))
+#  abline(a= 0, b = 1, col = "blue")
+#  text(ctrl.vol.data[,j], exp.vol.data[,j], labels = 1:nrow(ctrl.vol.data), pos = 2)
+
+
+```
+### Summary of results
+
+Blue line indicates the null hypothesis: a slope of 0.512 for the total heart, modeled after a sphere reduced by 0.8 in all linear dimensions; and a slope of 1 based on no change in organ volume. The black line is the experimental result.
+
+```{r outliers}
+
+ctrl.omit = rownames(ctrl.vol.data[which(ctrl.vol.data$TotalHeart > 14000),])
+
+```
+
+
+```{r heart volumes for all baselines}
+allbase = dir("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/")
+allbase = gsub("_baseline.nrrd", "", allbase)
+allbase = allbase[-grep(pattern = "Atlas", allbase)]
+allbase = allbase[-29]
+
+# MEMOSbaseline = dir("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/MEMOS/")
+# MEMOSbaseline = MEMOSbaseline[-grep(pattern = "Atlas", MEMOSbaseline)]
+# file.rename( from = paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/MEMOS/", MEMOSbaseline),
+#              to = paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/MEMOS/", gsub(".seg.nrrd", ".5_baseline.seg.nrrd", MEMOSbaseline)))
+
+
+
+imgs.allbase = list()
+segments.allbase = list()
+n = 0
+for(i in 1:length(allbase)){
+    n = n + 1
+    imgs.allbase[[n]] = antsImageRead(paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/", allbase[i], "_baseline.nrrd"))
+    segments.allbase[[n]] = antsImageRead(paste0("/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/MEMOS/", allbase[i], "_baseline.seg.nrrd"))
+    segments.allbase[[n]] = resampleImageToTarget(image = segments.allbase[[n]], target = imgs.allbase[[n]], interpType = "genericLabel")
+}
+
+seg.stats.allbase = list()
+for(i in 1:length(allbase)){
+  seg.stats.allbase[[i]] = labelStats(imgs.allbase[[i]], segments.allbase[[i]])
+}
+names(seg.stats.allbase) <- paste0(allbase, "_baseline")
+
+labelnames = read.csv("/home2/rachel/P01/KOMP_Analysis/Masks/komp_label_conversion.csv")
+allbase.vol.data = matrix(nrow = length(seg.stats.allbase), ncol = length(seg.stats.allbase[[1]]$Volume))
+
+for(i in 1:length(seg.stats.allbase)){
+  n=i
+  allbase.vol.data[i,] = seg.stats.allbase[[i]]$Volume
+}
+
+allbase.vol.data = as.data.frame(allbase.vol.data, row.names = names(seg.stats.allbase))
+colnames(allbase.vol.data) <- paste0("Label_", seg.stats.allbase[[1]]$LabelValue)
+
+allbase.vol.data$TotalHeart = allbase.vol.data[,19] + allbase.vol.data[,20] + allbase.vol.data[,50] + allbase.vol.data[,51]
+plot(x = allbase.vol.data$TotalHeart, y = allbase.vol.data$TotalHeart)
+
+baseline.omit = row.names( allbase.vol.data[which(allbase.vol.data$TotalHeart > 14000),] )
+
+```

@@ -1,0 +1,257 @@
+---
+title: "Jacobian Analysis Senstitivity"
+author: "R.A. Roston"
+date: "21/06/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ANTsR)
+library(ANTsRCore)
+library(viridis)
+
+```
+
+## Setup
+
+```{r sample setup}
+
+ctrl = "baseline"
+dir.experiment = "Exp5_HeartShrink"
+experiment = "Exp5"
+
+dir.determinants.ctrl = "/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/JacobianDeterminants/"
+dir.determinants.exp = "/home2/rachel/P01/KOMP_Analysis/Experiments/Exp5_HeartShrink/JacobianDeterminants/"
+
+
+```
+
+
+```{r load/calc Jacobian determinants}
+
+muts = vector()
+ctrls = vector()
+jacs.ctrls = list()
+jacs.muts = list()
+jacs = list()
+
+
+dir.determinants.ctrl
+ctrls = dir(paste0(dir.determinants.ctrl, "baseline_wholebody/"))
+for(i in 1:length(ctrls)) jacs.ctrls[[i]] = antsImageRead(paste0(dir.determinants.ctrl, "baseline_wholebody/", ctrls[i]))
+  
+muts = dir(paste0(dir.determinants.exp, experiment, "_wholebody/"))
+for(i in 1:length(muts)) jacs.muts[[i]] = antsImageRead(paste0(dir.determinants.exp, experiment, "_wholebody/", muts[i]))
+    
+   
+    
+jacs = c(jacs.ctrls, jacs.muts)
+groups = as.factor(c(rep("C", length(ctrls)), rep("M", length(muts))))
+
+```
+
+
+```{r function for regression}
+
+jacobian.stats <- function(mask,
+                           run,
+                           jacs,
+                           groups,
+                           P = 0.05,
+                           dir.mask = "/home2/rachel/P01/KOMP_Analysis/Masks/",
+                           atlas.file = "/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/Embryo_Atlas.nii.gz"){
+
+  library(ANTsR)
+  library(ANTsRCore)
+  library(viridis)
+ #set the regression
+  print("Starting statistical analysis")
+  atlas_mask = antsImageRead(paste0(dir.mask, "Embryo_Atlas_mask_", mask, ".nrrd"))
+  j_mat = imageListToMatrix( jacs, atlas_mask )
+  j_mdl = lm( j_mat ~ groups)    # raw volume data
+  j_bmdl = bigLMStats( j_mdl , 1.e-5 )
+  print( min( p.adjust( j_bmdl$beta.pval, 'none' ) , na.rm=T ) )
+  
+  #do multiple corrections and prepare the plots
+  #P defines the significance level we want to evaluate things after FDR correction
+  volstats = j_bmdl$beta.pval
+  pImg = makeImage( atlas_mask, volstats)
+  #correct.ps= p.adjust(volstats,'fdr')
+  #pImg = makeImage( atlas_mask, correct.ps)
+  pMask = thresholdImage(pImg, 10^-16, P, 1, 0)
+  betaImg = makeImage( atlas_mask, j_bmdl$beta ) * pMask
+  
+  # plots will display only the voxels (within the mask) that remain significantly different after the FDR 
+  # the color map is the magnitude of the effect 
+  # positive values expansion, negative values contraction with respect to the atlas.
+  
+  print("Creating images")
+  atlas = antsImageRead(atlas.file)
+
+  plot( atlas, betaImg, axis=1, 
+        nslices=28, ncolumns=7, 
+        window.overlay = c(0.001,1), 
+        color.overlay = "viridis",
+        alpha=.8, colorbar = T,
+        title.colorbar = paste(run, "+"))
+  
+  
+  plot( atlas, betaImg, axis=1, 
+        nslices=28, ncolumns=7, 
+        window.overlay=c(-1, -.001), 
+        color.overlay = "viridis",
+        alpha=.8, colorbar = T,
+        title.colorbar = paste(run, "-"))
+  
+  
+  print("Jacobian stats completed")
+}
+
+
+jacobian.stats.pcor <- function(mask,
+                           run,
+                           jacs,
+                           groups,
+                           P = 0.05,
+                           dir.mask = "/home2/rachel/P01/KOMP_Analysis/Masks/",
+                           atlas.file = "/home2/rachel/P01/KOMP_Analysis/Experiments/baselines/CT/Embryo_Atlas.nii.gz"){
+
+  library(ANTsR)
+  library(ANTsRCore)
+  library(viridis)
+ #set the regression
+  print("Starting statistical analysis")
+  atlas_mask = antsImageRead(paste0(dir.mask, "Embryo_Atlas_mask_", mask, ".nrrd"))
+  j_mat = imageListToMatrix( jacs, atlas_mask )
+  j_mdl = lm( j_mat ~ groups)    # raw volume data
+  j_bmdl = bigLMStats( j_mdl , 1.e-5 )
+  print( min( p.adjust( j_bmdl$beta.pval, 'none' ) , na.rm=T ) )
+  
+  #do multiple corrections and prepare the plots
+  #P defines the significance level we want to evaluate things after FDR correction
+  volstats = j_bmdl$beta.pval
+  correct.ps= p.adjust(volstats,'fdr')
+  pImg = makeImage( atlas_mask, correct.ps)
+  pMask = thresholdImage(pImg, 10^-16, P, 1, 0)
+  betaImg = makeImage( atlas_mask, j_bmdl$beta ) * pMask
+  
+  # plots will display only the voxels (within the mask) that remain significantly different after the FDR 
+  # the color map is the magnitude of the effect 
+  # positive values expansion, negative values contraction with respect to the atlas.
+  
+  print("Creating images")
+  atlas = antsImageRead(atlas.file)
+
+  plot( atlas, betaImg, axis=1, 
+        nslices=28, ncolumns=7, 
+        window.overlay = c(0.001,1), 
+        color.overlay = "viridis",
+        alpha=.8, colorbar = T,
+        title.colorbar = paste(run, "+"))
+  
+  
+  plot( atlas, betaImg, axis=1, 
+        nslices=28, ncolumns=7, 
+        window.overlay=c(-1, -.001), 
+        color.overlay = "viridis",
+        alpha=.8, colorbar = T,
+        title.colorbar = paste(run, "-"))
+  
+  
+  print("Jacobian stats completed")
+}
+
+```
+
+
+# Analyses
+
+```{r minimum sample}
+
+n.muts = sequence(15, from = 2, by = 2)
+
+
+for(i in 1:length(n.muts)){
+  perm = sample(1:length(jacs.muts), n.muts[i], replace = FALSE)
+  
+  jacobian.stats(mask = "wholebody", 
+                 jacs = c(jacs.ctrls, jacs.muts[perm]), 
+                 groups = as.factor(c(rep("C", length(jacs.ctrls)), rep("M", length(jacs.muts[perm])))), 
+                 run = paste0("n = ", n.muts[i]))
+  
+}
+
+
+```
+
+
+```{r permutations}
+
+n = 8
+P = 50
+
+PermSamples <- matrix(0, nrow = n, ncol = P)
+for(i in 1:P){
+  PermSamples[,i] <- sample(1:length(jacs.muts), size = n, replace = F)
+}
+
+
+for(i in 1:P){
+  perm = sample(1:length(jacs.muts), PermSamples[,i], replace = FALSE)
+  
+  jacobian.stats(mask = "wholebody", 
+                 jacs = c(jacs.ctrls, jacs.muts[PermSamples[,1]]), 
+                 groups = as.factor(c(rep("C", length(jacs.ctrls)), rep("M", n))), 
+                 run = paste0("#", i))
+  
+}
+
+
+```
+
+
+```{r minimum sample w/ p.adjust}
+
+n.muts = sequence(3, from = 10, by = 10)
+
+
+for(i in 1:length(n.muts)){
+  perm = sample(1:length(jacs.muts), n.muts[i], replace = FALSE)
+  
+  jacobian.stats.pcor(mask = "wholebody", 
+                     jacs = c(jacs.ctrls, jacs.muts[perm]), 
+                     groups = as.factor(c(rep("C", length(jacs.ctrls)), rep("M", length(jacs.muts[perm])))), 
+                     run = paste0("n = ", n.muts[i]))
+  
+}
+
+
+```
+
+
+
+```{r permutations w/ pcor}
+
+n = 8
+P = 5
+
+PermSamples <- matrix(0, nrow = n, ncol = P)
+for(i in 1:P){
+  PermSamples[,i] <- sample(1:length(jacs.muts), size = n, replace = F)
+}
+
+
+for(i in 1:P){
+  perm = sample(1:length(jacs.muts), PermSamples[,i], replace = FALSE)
+  
+  jacobian.stats.pcor(mask = "wholebody", 
+                 jacs = c(jacs.ctrls, jacs.muts[PermSamples[,1]]), 
+                 groups = as.factor(c(rep("C", length(jacs.ctrls)), rep("M", n))), 
+                 run = paste0("#", i))
+  
+}
+
+
+```
